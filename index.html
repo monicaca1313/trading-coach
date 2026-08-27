@@ -50,7 +50,7 @@
   #micBtn svg { width:26px; height:26px; }
   @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(240,180,41,.45);} 70%{box-shadow:0 0 0 22px rgba(240,180,41,0);} 100%{box-shadow:0 0 0 0 rgba(240,180,41,0);} }
   #hint { font-size:11px; color:#8B92A5; }
-  #textRow { display:none; width:100%; gap:8px; }
+  #textRow { display:flex; width:100%; gap:8px; margin-top:10px; }
   #textInput { flex:1; background:#1B2029; border:none; border-radius:12px; padding:12px 14px; color:#EDEEF2; font-size:14px; }
   #sendBtn { background:#F0B429; border:none; border-radius:12px; padding:0 16px; font-weight:600; color:#12151C; }
   #keySetup { padding:16px 20px; font-size:12px; color:#8B92A5; }
@@ -83,7 +83,7 @@
       <button id="micBtn"><svg viewBox="0 0 24 24" fill="#12151C"><path d="M12 14a3 3 0 003-3V5a3 3 0 00-6 0v6a3 3 0 003 3z"/><path d="M19 11a1 1 0 00-2 0 5 5 0 01-10 0 1 1 0 00-2 0 7 7 0 006 6.93V20H9a1 1 0 000 2h6a1 1 0 000-2h-2v-2.07A7 7 0 0019 11z"/></svg></button>
       <div id="hint">按一下開始講，再按一下結束</div>
       <div id="textRow">
-        <input id="textInput" placeholder="這台裝置不支援語音，直接打字" />
+        <input id="textInput" placeholder="語音讀錯字可以直接打字" />
         <button id="sendBtn">送出</button>
       </div>
     </footer>
@@ -225,7 +225,10 @@ if (!SR) {
     listening = false;
     micBtn.classList.remove("listening");
     hint.textContent = "按一下開始講，再按一下結束";
-    if (transcript.trim()) sendToCoach(transcript.trim());
+    if (transcript.trim()) {
+      textInput.value = transcript.trim();
+      textInput.focus();
+    }
     transcript = "";
   };
   rec.onerror = () => {
