@@ -180,7 +180,7 @@ async function sendToCoach(text) {
         "Authorization": "Bearer " + apiKey
       },
       body: JSON.stringify({
-        model: "moonshotai/kimi-k2-instruct",
+        model: "openai/gpt-oss-120b",
         max_tokens: 1000,
         messages: [{ role: "system", content: buildSystemPrompt() }, ...history.slice(-10)]
       })
