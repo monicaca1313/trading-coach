@@ -419,7 +419,7 @@ function savePoints(list) { localStorage.setItem(POINTS_KEY, JSON.stringify(list
 closeInput.value = localStorage.getItem(CLOSE_KEY) || "";
 closeInput.addEventListener("change", () => localStorage.setItem(CLOSE_KEY, closeInput.value));
 
-const DEFAULT_LABELS = ["日盤收盤價", "夜盤收盤價", "缺口上緣", "缺口下緣", "60K亞當", "斷勢防守點", "30K黑頂", "30K紅底"];
+const DEFAULT_LABELS = ["夜盤收盤價", "缺口上緣（多方缺口）", "缺口上緣（空方缺口）", "缺口上緣（對稱缺口）", "缺口下緣（多方缺口）", "缺口下緣（空方缺口）", "缺口下緣（對稱缺口）", "60K亞當", "斷勢防守點", "30K黑頂", "30K紅底"];
 
 function renderPoints() {
   const points = loadPoints();
@@ -476,7 +476,9 @@ copyScriptBtn.addEventListener("click", () => {
   });
 });
 
-if (loadPoints().length === 0) {
+const existingPoints = loadPoints();
+const allEmpty = existingPoints.every(p => p.price === "" || p.price === undefined || p.price === null);
+if (existingPoints.length === 0 || allEmpty) {
   savePoints(DEFAULT_LABELS.map(l => ({ price: "", label: l })));
 }
 renderPoints();
