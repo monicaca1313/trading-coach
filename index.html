@@ -33,6 +33,25 @@
   .rule-item .rule-text { font-size:13px; margin-top:4px; line-height:1.5; }
   .rule-item .rule-del { margin-top:6px; background:none; border:none; color:#E5484D; font-size:11px; padding:0; }
   #rulesEmpty { color:#8B92A5; font-size:13px; text-align:center; margin-top:20px; }
+  #scriptPage { padding:16px 20px; overflow-y:auto; }
+  #scriptPage p.tip { font-size:12px; color:#8B92A5; margin:0 0 12px; line-height:1.6; }
+  .field-label { font-size:12px; color:#8B92A5; margin:14px 0 6px; }
+  #closeInput { width:100%; background:#1B2029; border:none; border-radius:12px; padding:12px 14px;
+    color:#EDEEF2; font-size:14px; font-family:inherit; }
+  .point-row { display:flex; gap:8px; margin-bottom:8px; }
+  .point-row input.price { width:100px; background:#1B2029; border:none; border-radius:10px;
+    padding:10px 10px; color:#EDEEF2; font-size:13px; font-family:inherit; }
+  .point-row input.label { flex:1; background:#1B2029; border:none; border-radius:10px;
+    padding:10px 12px; color:#EDEEF2; font-size:13px; font-family:inherit; }
+  .point-row button.del { background:none; border:none; color:#E5484D; font-size:18px; padding:0 4px; }
+  #addPointBtn { margin:6px 0 16px; background:#1B2029; border:1px dashed #8B92A5; border-radius:10px;
+    padding:10px; width:100%; color:#8B92A5; font-size:13px; }
+  #genScriptBtn { width:100%; background:#F0B429; border:none; border-radius:12px; padding:12px;
+    font-weight:600; color:#12151C; font-size:14px; margin-bottom:16px; }
+  #scriptOutput { background:#1B2029; border-radius:12px; padding:14px; font-size:13px; line-height:1.8;
+    white-space:pre-wrap; display:none; }
+  #copyScriptBtn { margin-top:10px; background:none; border:1px solid #8B92A5; border-radius:10px;
+    padding:8px; width:100%; color:#8B92A5; font-size:12px; display:none; }
   #log { flex:1; overflow-y:auto; padding:16px 20px; display:flex; flex-direction:column; gap:10px; }
   .empty { color:#8B92A5; font-size:14px; text-align:center; margin-top:40px; line-height:1.7; padding:0 24px; }
   .bubble { max-width:82%; padding:10px 14px; border-radius:16px; font-size:14px; line-height:1.5; }
@@ -71,6 +90,7 @@
   <div id="tabs">
     <button id="tabCoachBtn" class="active">教練</button>
     <button id="tabRulesBtn">新增規則</button>
+    <button id="tabScriptBtn">開盤劇本</button>
   </div>
 
   <div id="coachPage" class="page active">
@@ -91,10 +111,24 @@
 
   <div id="rulesPage" class="page">
     <p class="tip">把你新驗證過、覺得有效的交易方法記下來，教練之後會把這些一起納入判斷。</p>
-    <textarea id="newRuleInput" placeholder="例如：60K拉回測到呂布位置，量縮站穩就可以接"></textarea>
+    <textarea id="newRuleInput" placeholder="例如：60K拉回測到大量位置，收上就可以接"></textarea>
     <button id="saveRuleBtn">儲存這條規則</button>
     <div id="customRulesList"></div>
     <div id="rulesEmpty" style="display:none;">目前還沒有新增任何規則</div>
+  </div>
+
+  <div id="scriptPage" class="page">
+    <p class="tip">開盤前把今天的收盤價跟關鍵點位輸入，按產生，會列出往上開/往下開分別會先碰到哪裡。</p>
+    <div class="field-label">今日收盤價（基準）</div>
+    <input id="closeInput" type="number" inputmode="decimal" placeholder="例如：45090" />
+
+    <div class="field-label">點位清單（價位＋說明，例如「今日最高（當日高點）」）</div>
+    <div id="pointsList"></div>
+    <button id="addPointBtn">＋ 新增一個點位</button>
+
+    <button id="genScriptBtn">產生開盤劇本</button>
+    <div id="scriptOutput"></div>
+    <button id="copyScriptBtn">複製劇本文字</button>
   </div>
 
 <script>
@@ -112,7 +146,93 @@ apiKeyInput.addEventListener("change", () => {
   localStorage.setItem(STORAGE_KEY, apiKey);
 });
 
-const RULES = "開盤洗前高、回測大量、缺口W、打腳、空襲測開盤價、30K頂+呂布、收上呂布2號、測20MA、多方呂布、兩腳、開盤測黑頂、出現空方成本後站上又跌破、測開盤價、回測空方成本出現呂布、回測前方呂布位置、破底翻、站上小流看大流、奇襲力道會跑完、日K打腳、注意下引線、回測5K第一根高點、規劃30K會回測哪裡、確定擋再進、小流不過看大流、這兩次的地方要跑、日K多勢大小流未破多訊、突破回測出量處、口差不對不要接、空完出量就要跑、PM滿足跑、靠近滿足點的缺口不要接、第二腳進場等呂布位置回測接、不要找逆勢訊號、口差-3000以上不動作、日頸測兩次、第二筆要接要等尖尖的、沒有人知道高點在哪只有擋了才能估、結算日短做、開盤大跌是給留倉的人停利用的、頂多再打第二隻腳、打腳完盤就上、大紅大黑頂很多人在用的地方、均線-城、收上大流看小流、大流下有大紅要等、有很多人在顧反手會被巴、預估日盤沒跑完夜盤會跑完、斷勢反手、不要取消停損、大跌後不要追空看5K兩腳、5K過頸翻亞當、過高不破高、滿足點要走、看型態、看錯即砍、翻亞當要等5K收定、破低不過低、亞當不能當進場點、5K尖尖的才能下、站在後面不要急、紅下尖綠上尖、尖尖後面那根、好球整理完出去、壞球滿足區撞牆、最好的辦法等線到再做、策略隨球權與勢改變、Vic 18.9選多做、懷疑就不要下、60K亞當要等整理再上、用1K畫看5K型態、等60K邊邊等5K破底翻、要設停損左邊要有人擋、回測關鍵點位要有呂布、高處下來要整理過才C尖尖的、回測高點要等尖尖的、突破空防回測C、PM等60K邊邊5K W、奇襲防守點上有尖尖、回撤奇襲防守點要等整理尖尖的配點位、要等滿足點才進、看到上尖P要等回測、高點下來C要等整理尖尖的、球權看有沒有延續、等尖尖下不去才C、等60K頸線、高點不過P、60K邊邊可等兩滿、1K 5K亞當要等尖尖的等一條線、日K突破前高可翻亞當、多襲回測黑頂尖尖C、回測黑頂守黑頂等60K邊邊比較好、收上多方防守點有尖尖C、站上轉勢防守點要等回測、向下整理尖尖C、突破回測前高C、Vix 23大跌可賭八滿50倍、打腳要先跑";
+const RULES = "開盤洗前高收上做多、開盤洗前高收破做空、回測大量處、缺口處打腳W做多、打腳W做多、空襲測開盤價5K收不上做空、30K黑頂+大量、收上大量2號做多、回測30K20MA、多方大量回測做多、兩腳做多、開盤測黑頂不過做空、出現空方成本後站上又跌破做空、回測開盤價收上做多、回測開盤價收破做空、回測空方成本出現大量做空、回測前方多方大量位置做多、回測前方空方大量位置做空、破底翻做多、站上30K20MA看大流30K60MA、奇襲力道會跑完、日K打腳注意多方、回測下引線注意多方、回測5K第一根高點收上做多收破做空、規劃30K會回測哪裡、確定擋再進、30K20MA不過看30K60MA、測兩次的地方要注意、日K多勢30K20MA/30K60MA未破多訊、突破回測出量處等回測、口差不對不要接、空完出量就要跑、PM收盤價的滿足點要跑、滿足點抓50點的倍數、靠近滿足點的缺口不要接、第二腳進場等大量位置回測接、不要找逆勢訊號、口差-3000以上不動作、日K頸線回測兩次要注意準備進場、第二筆如果要接要等尖尖的訊號、沒有人知道高點在哪、只有擋了才能估、結算日短做或賭60K翻亞當點位、開盤大跌是給留倉的人停利用的、頂多再打第二隻腳、打腳完盤就上、大紅大黑頂很多人在用的地方、均線＝城池、收上大流看小流、大流下有大紅要等收上或者短做、有大量在顧反手會被巴、預估日盤沒跑完的夜盤會跑完、斷勢要反手、停損抓十點不要取消停損這個很重要、大跌後不要追空看5K兩腳、5K過頸線可以翻亞當、過高不破高、滿足點要走、看型態、看錯即砍、翻亞當要等5K收定、破低不過低、亞當不能當進場點、5K尖尖的才能下、站在後面不要急、紅下尖綠上尖、尖尖後面那根、好球整理完出去、壞球滿足區撞牆、最好的辦法等線到再做、策略隨球權與勢改變、Vic 18.9選多做、懷疑就不要下、60K亞當要等整理再上、用1K畫看5K型態、等60K邊邊等5K破底翻、要設停損左邊要有人擋、回測關鍵點位要有大量、高處下來要整理過尖尖的才C、回測高點要等尖尖的、突破空襲防守點回測C、PM盤等60K邊邊5K W、奇襲防守點上有尖尖的要注意、回撤奇襲防守點要等整理尖尖的搭配點位、要等滿足點才進、看到上尖P要等回測、高點下來C要等整理尖尖的、球權看有沒有延續、等尖尖下不去才C、等60K頸線、高點不過P、60K邊邊可等兩滿、1K 5K亞當要等尖尖的等一條線、日K突破前高可翻亞當、多襲回測黑頂尖尖的C、回測黑頂守黑頂等60K邊邊比較好、收上多方防守點有尖尖C、站上轉勢防守點要等回測不破、向下整理尖尖C、突破前高回測C、Vix 23大跌可賭八滿50倍、打腳要先跑、不再跌等第二低點做多、不再漲等第二高點做空、跳空攻擊就是所謂的奇襲發球權、連續奇襲且收盤均未破成勢、勢斷表示連續奇襲斷了、勢的防守點會在持續出現的上一個奇襲防守點並沿著新出現的奇襲防守點移動、防守點破了才代表這個勢斷掉了沒破就是勢的延續、PM盤大量標準：1K 200口、5K 600口、30K 3000口";
+
+const ADVANCED_NOTES = `多空襲以PM盤為主。球權在哪，哪裡就是趨勢。如果球權是多方，然後空襲，空襲力道跑完就換多方了。
+
+超過3000口外資未平倉單，當天AM盤低點就是關鍵。
+
+尖尖的與缺口的抉擇就是分批或者不貪，方解此局，尤其多空成本頻繁出現的時候。
+
+怕買不到的人會被套在滿足點。乖乖等滿足點到多方大量處，通常是起漲點，但也有可能買不到，所以分批進場。很在意成本的話，滿足點+關鍵點位+大量再進場，缺點是可能買不到。
+
+PM盤和AM盤奇襲方向不同，不衝突。PM盤走完力道再換AM盤走。
+
+進場就要想好出場位置。如果想多看一下，就看關鍵點位有沒有出大量，有沒有反向訊號。
+
+影線容易來測，原理是主力量大，不一定一次成交完。
+
+多襲要避開空方關卡，怕開高走低破平盤。
+
+多空心態＝委均口差。
+
+空方對稱缺口是空訊，做多要等多方對稱缺口或多襲缺口。
+
+抓點位能準固然好，不準的時候要靠大量還有5K三法，不對勁的時候寧可先避開。
+
+搶空襲的短空單，如果震幅太小，回歸日K多襲缺口沒斷，選一邊做。
+
+做多避開空方成本，做空避開外資多單成本。要成本好，大量處進場。
+
+基本上摸完大黑頂多少都會回一下。
+
+多方三法：找點位做多或直接進場，如果直接突破一樣回測接回來，只要三法沒有消失，把它放在心中。
+
+點位到了，就要決定單的去留，要先出還是賭履約，通常不會超過1分鐘，必須當機立斷。
+
+大量區會洗一下，上的不會太乾脆。
+
+1K沒大量，不代表5K沒有。
+
+接的理由是什麼？防守點在哪裡？這些在下單的時候就要清清楚楚，有一個不確定就不要按。
+
+如果當天震幅已經跑完，最好遇到高低點附近就要閃開。
+
+第一根5K高低點也可以拿來做參考。
+
+缺口下緣站上就有機會去缺口上緣。
+
+關鍵點位+大量反轉機會高。
+
+勝距短勝率才高。
+
+30K20MA、30K60MA多空線合一，有機會來一波大的。
+
+第一根5分K穿過昨天收盤價就是不明確。
+
+日K出現缺口回測缺口勝算高。
+
+操作大部分的時間都在等點位，追的永遠來不及。
+
+模擬單要練到反射動作，實單就不會多想，心魔要克服，必須相信自己的方法，嚴設停損落實執行。
+
+交易日記：路徑規劃，出手有沒有攻防進退的概念。
+
+驛站理論：開盤收不上某點位，就是要去某點位。
+
+點到點操盤：要換個心態，不論日盤夜盤，只看起點和終點，起點不破不撤，終點不到不撤。
+
+通常出現多襲缺口，可以直接看大黑起跌的缺口，只是中途有回馬槍，可以想想分段還是一單報到底。
+
+盤前要找出收盤價最近的缺口。
+
+務求出得掉，不要抱怨少賺。
+
+點到點的操作難處，不在理論在心魔。
+
+缺口下緣站不上，會往下一個缺口去。
+
+心魔、資金、盯盤時間，三者都要顧。
+
+看不懂時空手。
+
+先順PM盤，跑完再回歸AM盤。
+
+回測到哪裡，本來就是最難的一關，所以會試單再加碼。
+
+外資空單成本被突破，會拉回測補掉再上。
+
+等第一根5K收完，收盤價畫出來。`;
 
 const CUSTOM_RULES_KEY = "trading_coach_custom_rules";
 
@@ -129,7 +249,7 @@ function buildSystemPrompt() {
   const customText = custom.length
     ? "\n\n她後來自己新增、驗證過的成功交易方法（優先參考，這些是她實戰確認過的）：\n" + custom.map(r => r.text).join("、")
     : "";
-  return "你是使用者本人的台指期私人交易教練，完全按照她自己的多時間週期價格行為系統來判斷，不要給教科書式的通用技術分析建議。她會用口語、片段的方式描述目前盤勢或部位，你要用她自己的術語和規則去判讀。\n\n她的規則庫：\n" + RULES + customText + "\n\n你的任務：1) 用她的術語判讀她描述的狀況對應到規則庫裡的哪一條或哪幾條 2) 給出具體、可立即執行的下一步 3) 語氣像教練在場邊喊話。\n\n嚴格的講話規則（違反任何一條都算失敗）：\n- 絕對不要把規則名稱用括號標註出來，例如「（對應『XX』）」「（XX規則）」這種寫法禁止，你心裡知道對應哪條就好，不要講給她聽你是怎麼查表的\n- 一句只講一件事，講完就換下一句。不要用分號、頓號把好幾件事串成一個長句，那是報告的寫法不是講話的寫法\n- 不要用成語、文言字眼（例如「切莫」「務必」「當下」這類），要用她平常真的會用的口語，例如「先別」「等一下」「先不要」\n- 總長度2-3句話，每句都短，像真人在旁邊看盤喊一句、停一下、再喊一句，不是一次講完的完整報告\n- 可以直接用她的術語（呂布、亞當、尖尖、球權、滿足點等）回她，不用翻譯成白話\n\n你不是投資顧問，但你是她本人交易系統的化身，不要加免責聲明。\n\n範例（她說「收上空襲防守點，口差還在-3200」）：\n壞範例（禁止這樣）：收上空襲防守點，先等尖尖C現形再下單（對應「收上空襲防守點有尖尖C」）；口差若仍在-3000以上，先別動；切莫逆勢追。\n好範例（照這樣寫）：收上空襲防守點了。先別急，等尖尖出來。口差還在-3000以上，先不要動。";
+  return "你是使用者本人的台指期私人交易教練，完全按照她自己的多時間週期價格行為系統來判斷，不要給教科書式的通用技術分析建議。她會用口語、片段的方式描述目前盤勢或部位，你要用她自己的術語和規則去判讀。\n\n她的規則庫：\n" + RULES + customText + "\n\n她的進階心法與補充原則（判讀時也要參考，這些是她多年操作累積的心得，比單條規則更全面）：\n" + ADVANCED_NOTES + "\n\n你的任務：1) 用她的術語判讀她描述的狀況對應到規則庫裡的哪一條或哪幾條 2) 給出具體、可立即執行的下一步 3) 語氣像教練在場邊喊話。\n\n嚴格的講話規則（違反任何一條都算失敗）：\n- 絕對不要把規則名稱用括號標註出來，例如「（對應『XX』）」「（XX規則）」這種寫法禁止，你心裡知道對應哪條就好，不要講給她聽你是怎麼查表的\n- 一句只講一件事，講完就換下一句。不要用分號、頓號把好幾件事串成一個長句，那是報告的寫法不是講話的寫法\n- 不要用成語、文言字眼（例如「切莫」「務必」「當下」這類），要用她平常真的會用的口語，例如「先別」「等一下」「先不要」\n- 總長度2-3句話，每句都短，像真人在旁邊看盤喊一句、停一下、再喊一句，不是一次講完的完整報告\n- 可以直接用她的術語（呂布、亞當、尖尖、球權、滿足點等）回她，不用翻譯成白話\n\n你不是投資顧問，但你是她本人交易系統的化身，不要加免責聲明。\n\n範例（她說「收上空襲防守點，口差還在-3200」）：\n壞範例（禁止這樣）：收上空襲防守點，先等尖尖C現形再下單（對應「收上空襲防守點有尖尖C」）；口差若仍在-3000以上，先別動；切莫逆勢追。\n好範例（照這樣寫）：收上空襲防守點了。先別急，等尖尖出來。口差還在-3000以上，先不要動。";
 }
 
 const logEl = document.getElementById("log");
@@ -264,14 +384,102 @@ const tabRulesBtn = document.getElementById("tabRulesBtn");
 const coachPage = document.getElementById("coachPage");
 const rulesPage = document.getElementById("rulesPage");
 tabCoachBtn.addEventListener("click", () => {
-  tabCoachBtn.classList.add("active"); tabRulesBtn.classList.remove("active");
-  coachPage.classList.add("active"); rulesPage.classList.remove("active");
+  tabCoachBtn.classList.add("active"); tabRulesBtn.classList.remove("active"); tabScriptBtn.classList.remove("active");
+  coachPage.classList.add("active"); rulesPage.classList.remove("active"); scriptPage.classList.remove("active");
 });
 tabRulesBtn.addEventListener("click", () => {
-  tabRulesBtn.classList.add("active"); tabCoachBtn.classList.remove("active");
-  rulesPage.classList.add("active"); coachPage.classList.remove("active");
+  tabRulesBtn.classList.add("active"); tabCoachBtn.classList.remove("active"); tabScriptBtn.classList.remove("active");
+  rulesPage.classList.add("active"); coachPage.classList.remove("active"); scriptPage.classList.remove("active");
   renderCustomRules();
 });
+
+const tabScriptBtn = document.getElementById("tabScriptBtn");
+const scriptPage = document.getElementById("scriptPage");
+tabScriptBtn.addEventListener("click", () => {
+  tabScriptBtn.classList.add("active"); tabCoachBtn.classList.remove("active"); tabRulesBtn.classList.remove("active");
+  scriptPage.classList.add("active"); coachPage.classList.remove("active"); rulesPage.classList.remove("active");
+});
+
+// Opening script generator
+const CLOSE_KEY = "opening_script_close";
+const POINTS_KEY = "opening_script_points";
+const closeInput = document.getElementById("closeInput");
+const pointsList = document.getElementById("pointsList");
+const addPointBtn = document.getElementById("addPointBtn");
+const genScriptBtn = document.getElementById("genScriptBtn");
+const scriptOutput = document.getElementById("scriptOutput");
+const copyScriptBtn = document.getElementById("copyScriptBtn");
+
+function loadPoints() {
+  try { return JSON.parse(localStorage.getItem(POINTS_KEY) || "[]"); }
+  catch (e) { return []; }
+}
+function savePoints(list) { localStorage.setItem(POINTS_KEY, JSON.stringify(list)); }
+
+closeInput.value = localStorage.getItem(CLOSE_KEY) || "";
+closeInput.addEventListener("change", () => localStorage.setItem(CLOSE_KEY, closeInput.value));
+
+const DEFAULT_LABELS = ["日盤收盤價", "夜盤收盤價", "缺口上緣", "缺口下緣", "60K亞當", "斷勢防守點", "30K黑頂", "30K紅底"];
+
+function renderPoints() {
+  const points = loadPoints();
+  pointsList.innerHTML = "";
+  points.forEach((p, i) => {
+    const row = document.createElement("div");
+    row.className = "point-row";
+    row.innerHTML = `<input class="price" type="number" inputmode="decimal" placeholder="價位" value="${p.price ?? ""}">
+      <input class="label" type="text" placeholder="說明，例如：今日最高（當日高點）" value="${p.label ?? ""}">
+      <button class="del">✕</button>`;
+    const priceEl = row.querySelector(".price");
+    const labelEl = row.querySelector(".label");
+    priceEl.addEventListener("change", () => { const cur = loadPoints(); cur[i].price = priceEl.value; savePoints(cur); });
+    labelEl.addEventListener("change", () => { const cur = loadPoints(); cur[i].label = labelEl.value; savePoints(cur); });
+    row.querySelector(".del").addEventListener("click", () => {
+      const cur = loadPoints().filter((_, idx) => idx !== i);
+      savePoints(cur);
+      renderPoints();
+    });
+    pointsList.appendChild(row);
+  });
+}
+
+addPointBtn.addEventListener("click", () => {
+  const points = loadPoints();
+  const nextLabel = DEFAULT_LABELS[points.length % DEFAULT_LABELS.length] || "";
+  points.push({ price: "", label: points.length < DEFAULT_LABELS.length ? nextLabel : "" });
+  savePoints(points);
+  renderPoints();
+});
+
+genScriptBtn.addEventListener("click", () => {
+  const close = parseFloat(closeInput.value);
+  if (isNaN(close)) { alert("先填今日收盤價"); return; }
+  const points = loadPoints()
+    .map(p => ({ price: parseFloat(p.price), label: (p.label || "").trim() }))
+    .filter(p => !isNaN(p.price) && p.label);
+  const above = points.filter(p => p.price > close).sort((a, b) => a.price - b.price);
+  const below = points.filter(p => p.price < close).sort((a, b) => b.price - a.price);
+  let text = `以今日收盤 ${close} 為基準，彙整所有已輸入點位，看往上開/往下開會先碰到哪裡\n\n`;
+  text += `🔺 若往上開，上面會碰到：\n\n`;
+  text += above.length ? above.map(p => `* ${p.price} ｜ ${p.label}`).join("\n") : "（沒有輸入高於收盤價的點位）";
+  text += `\n\n🔻 若往下開，下面會碰到：\n\n`;
+  text += below.length ? below.map(p => `* ${p.price} ｜ ${p.label}`).join("\n") : "（沒有輸入低於收盤價的點位）";
+  scriptOutput.textContent = text;
+  scriptOutput.style.display = "block";
+  copyScriptBtn.style.display = "block";
+});
+
+copyScriptBtn.addEventListener("click", () => {
+  navigator.clipboard.writeText(scriptOutput.textContent).then(() => {
+    copyScriptBtn.textContent = "已複製";
+    setTimeout(() => { copyScriptBtn.textContent = "複製劇本文字"; }, 1500);
+  });
+});
+
+if (loadPoints().length === 0) {
+  savePoints(DEFAULT_LABELS.map(l => ({ price: "", label: l })));
+}
+renderPoints();
 
 // Custom rules page
 const newRuleInput = document.getElementById("newRuleInput");
