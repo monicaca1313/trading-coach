@@ -310,7 +310,6 @@ async function sendToCoach(text) {
       || (data.error ? "錯誤：" + data.error.message : "沒有收到回應，再說一次看看");
     history.push({ role: "assistant", content: reply });
     render("coach", reply, nowStr());
-    speak(reply);
   } catch (e) {
     render("coach", "連線失敗，再說一次。", nowStr());
   } finally {
