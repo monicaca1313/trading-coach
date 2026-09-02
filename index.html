@@ -52,6 +52,20 @@
     white-space:pre-wrap; display:none; }
   #copyScriptBtn { margin-top:10px; background:none; border:1px solid #8B92A5; border-radius:10px;
     padding:8px; width:100%; color:#8B92A5; font-size:12px; display:none; }
+  #reviewPage { padding:16px 20px; overflow-y:auto; }
+  #reviewPage p.tip { font-size:12px; color:#8B92A5; margin:0 0 12px; line-height:1.6; }
+  #reviewDate { width:100%; background:#1B2029; border:none; border-radius:12px; padding:12px 14px;
+    color:#EDEEF2; font-size:14px; font-family:inherit; margin-bottom:10px; }
+  #newReviewInput { width:100%; background:#1B2029; border:none; border-radius:12px; padding:12px 14px;
+    color:#EDEEF2; font-size:14px; resize:vertical; min-height:100px; font-family:inherit; }
+  #saveReviewBtn { margin-top:8px; background:#F0B429; border:none; border-radius:10px; padding:10px 16px;
+    font-weight:600; color:#12151C; font-size:13px; }
+  #reviewList { margin-top:20px; display:flex; flex-direction:column; gap:10px; }
+  .review-item { background:#1B2029; border-left:2px solid #F0B429; border-radius:10px; padding:10px 12px; }
+  .review-item .review-date { font-size:11px; color:#F0B429; font-family:'SF Mono', ui-monospace, monospace; }
+  .review-item .review-text { font-size:13px; margin-top:4px; line-height:1.6; white-space:pre-wrap; }
+  .review-item .review-del { margin-top:6px; background:none; border:none; color:#E5484D; font-size:11px; padding:0; }
+  #reviewEmpty { color:#8B92A5; font-size:13px; text-align:center; margin-top:20px; }
   #log { flex:1; overflow-y:auto; padding:16px 20px; display:flex; flex-direction:column; gap:10px; }
   .empty { color:#8B92A5; font-size:14px; text-align:center; margin-top:40px; line-height:1.7; padding:0 24px; }
   .bubble { max-width:82%; padding:10px 14px; border-radius:16px; font-size:14px; line-height:1.5; }
@@ -91,6 +105,7 @@
     <button id="tabCoachBtn" class="active">教練</button>
     <button id="tabRulesBtn">新增規則</button>
     <button id="tabScriptBtn">開盤劇本</button>
+    <button id="tabReviewBtn">每日複盤</button>
   </div>
 
   <div id="coachPage" class="page active">
@@ -129,6 +144,15 @@
     <button id="genScriptBtn">產生開盤劇本</button>
     <div id="scriptOutput"></div>
     <button id="copyScriptBtn">複製劇本文字</button>
+  </div>
+
+  <div id="reviewPage" class="page">
+    <p class="tip">收盤後寫今天的複盤：路徑跟劇本一不一樣、有沒有照規則走、哪裡可以更好。</p>
+    <input id="reviewDate" type="date" />
+    <textarea id="newReviewInput" placeholder="例如：今天照劇本走，往上開站上缺口下緣就上多，滿足點到有跑掉，但第二腳等太久錯過"></textarea>
+    <button id="saveReviewBtn">儲存今天的複盤</button>
+    <div id="reviewList"></div>
+    <div id="reviewEmpty" style="display:none;">目前還沒有複盤紀錄</div>
   </div>
 
 <script>
@@ -182,6 +206,8 @@ const RULE_GROUPS = {
     { condition: "大跌後不要追空", detail: "看5K兩腳" },
     { condition: "5K過頸線", detail: "可以翻亞當" },
     { condition: "5K尖尖的", detail: "才能下單，是進場的時機閘門" },
+    { condition: "往下開", detail: "觀察回測第一根K開盤價" },
+    { condition: "往上開", detail: "觀察回測第一根K收盤價" },
   ],
 
   "30K/60K 中大局架構": [
@@ -234,7 +260,7 @@ const RULE_GROUPS = {
 
   "停損／滿足點／出場紀律": [
     { detail: "停損抓8點，不要取消停損", note: "非常重要" },
-    { detail: "滿足點抓50點的倍數" },
+    { detail: "滿足點抓100點的倍數" },
     { condition: "滿足點到", action: "要走" },
     { condition: "PM收盤價的滿足點", action: "要跑" },
     { condition: "靠近滿足點的缺口", action: "不要接" },
@@ -536,23 +562,25 @@ textInput.addEventListener("keydown", (e) => {
 // Tabs
 const tabCoachBtn = document.getElementById("tabCoachBtn");
 const tabRulesBtn = document.getElementById("tabRulesBtn");
+const tabScriptBtn = document.getElementById("tabScriptBtn");
+const tabReviewBtn = document.getElementById("tabReviewBtn");
 const coachPage = document.getElementById("coachPage");
 const rulesPage = document.getElementById("rulesPage");
-tabCoachBtn.addEventListener("click", () => {
-  tabCoachBtn.classList.add("active"); tabRulesBtn.classList.remove("active"); tabScriptBtn.classList.remove("active");
-  coachPage.classList.add("active"); rulesPage.classList.remove("active"); scriptPage.classList.remove("active");
-});
-tabRulesBtn.addEventListener("click", () => {
-  tabRulesBtn.classList.add("active"); tabCoachBtn.classList.remove("active"); tabScriptBtn.classList.remove("active");
-  rulesPage.classList.add("active"); coachPage.classList.remove("active"); scriptPage.classList.remove("active");
-  renderCustomRules();
-});
-
-const tabScriptBtn = document.getElementById("tabScriptBtn");
 const scriptPage = document.getElementById("scriptPage");
-tabScriptBtn.addEventListener("click", () => {
-  tabScriptBtn.classList.add("active"); tabCoachBtn.classList.remove("active"); tabRulesBtn.classList.remove("active");
-  scriptPage.classList.add("active"); coachPage.classList.remove("active"); rulesPage.classList.remove("active");
+const reviewPage = document.getElementById("reviewPage");
+
+const tabMap = [
+  [tabCoachBtn, coachPage, null],
+  [tabRulesBtn, rulesPage, () => renderCustomRules()],
+  [tabScriptBtn, scriptPage, null],
+  [tabReviewBtn, reviewPage, () => renderReviews()],
+];
+tabMap.forEach(([btn, page, onShow]) => {
+  btn.addEventListener("click", () => {
+    tabMap.forEach(([b, p]) => { b.classList.remove("active"); p.classList.remove("active"); });
+    btn.classList.add("active"); page.classList.add("active");
+    if (onShow) onShow();
+  });
 });
 
 // Opening script generator
@@ -677,6 +705,61 @@ saveRuleBtn.addEventListener("click", () => {
 });
 
 renderCustomRules();
+
+// Daily review (每日複盤)
+const REVIEW_KEY = "trading_coach_reviews";
+const reviewDate = document.getElementById("reviewDate");
+const newReviewInput = document.getElementById("newReviewInput");
+const saveReviewBtn = document.getElementById("saveReviewBtn");
+const reviewList = document.getElementById("reviewList");
+const reviewEmpty = document.getElementById("reviewEmpty");
+
+function todayStr() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+reviewDate.value = todayStr();
+
+function loadReviews() {
+  try { return JSON.parse(localStorage.getItem(REVIEW_KEY) || "[]"); }
+  catch (e) { return []; }
+}
+function saveReviews(list) { localStorage.setItem(REVIEW_KEY, JSON.stringify(list)); }
+
+function renderReviews() {
+  const list = loadReviews();
+  reviewList.innerHTML = "";
+  reviewEmpty.style.display = list.length ? "none" : "block";
+  list.slice().reverse().forEach((r) => {
+    const div = document.createElement("div");
+    div.className = "review-item";
+    div.innerHTML = `<div class="review-date">${r.date}</div><div class="review-text"></div>`;
+    div.querySelector(".review-text").textContent = r.text;
+    const del = document.createElement("button");
+    del.className = "review-del";
+    del.textContent = "刪除";
+    del.addEventListener("click", () => {
+      const cur = loadReviews().filter((x) => x.id !== r.id);
+      saveReviews(cur);
+      renderReviews();
+    });
+    div.appendChild(del);
+    reviewList.appendChild(div);
+  });
+}
+
+saveReviewBtn.addEventListener("click", () => {
+  const text = newReviewInput.value.trim();
+  if (!text) return;
+  const list = loadReviews();
+  list.push({ id: Date.now(), date: reviewDate.value || todayStr(), text });
+  saveReviews(list);
+  newReviewInput.value = "";
+  renderReviews();
+});
+
+renderReviews();
 </script>
 </body>
 </html>
