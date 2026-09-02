@@ -574,7 +574,7 @@ function savePoints(list) { localStorage.setItem(POINTS_KEY, JSON.stringify(list
 closeInput.value = localStorage.getItem(CLOSE_KEY) || "";
 closeInput.addEventListener("change", () => localStorage.setItem(CLOSE_KEY, closeInput.value));
 
-const DEFAULT_LABELS = ["夜盤收盤價", "缺口上緣（多方缺口）", "缺口上緣（空方缺口）", "缺口上緣（對稱缺口）", "缺口下緣（多方缺口）", "缺口下緣（空方缺口）", "缺口下緣（對稱缺口）", "60K亞當", "斷勢防守點", "30K黑頂", "30K紅底"];
+const DEFAULT_LABELS = ["夜盤收盤價", "缺口上緣（多方缺口）", "缺口下緣（多方缺口）", "缺口上緣（空方缺口）", "缺口下緣（空方缺口）", "缺口上緣（對稱缺口）", "缺口下緣（對稱缺口）", "30K20MA（移動城牆）", "30K60MA（移動城牆）", "60K亞當", "斷勢防守點", "30K黑頂", "30K紅底"];
 
 function renderPoints() {
   const points = loadPoints();
