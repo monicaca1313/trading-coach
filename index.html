@@ -607,7 +607,7 @@ function savePoints(list) { localStorage.setItem(POINTS_KEY, JSON.stringify(list
 closeInput.value = localStorage.getItem(CLOSE_KEY) || "";
 closeInput.addEventListener("change", () => localStorage.setItem(CLOSE_KEY, closeInput.value));
 
-const DEFAULT_LABELS = ["日盤收盤價", "第一根5K開盤價", "缺口上緣（多方缺口）", "缺口下緣（多方缺口）", "缺口上緣（空方缺口）", "缺口下緣（空方缺口）", "缺口上緣（對稱缺口）", "缺口下緣（對稱缺口）", "30K20MA（移動城牆）", "30K60MA（移動城牆）", "60K亞當", "60K頸線", "斷勢防守點（多勢）", "斷勢防守點（空勢）", "30K黑頂", "30K紅底"];
+const DEFAULT_LABELS = ["日盤收盤價", "缺口上緣（多方缺口）", "缺口下緣（多方缺口）", "缺口上緣（空方缺口）", "缺口下緣（空方缺口）", "缺口上緣（對稱缺口）", "缺口下緣（對稱缺口）", "30K20MA（移動城牆）", "30K60MA（移動城牆）", "60K亞當", "60K頸線", "斷勢防守點（多勢）", "斷勢防守點（空勢）", "30K黑頂", "30K紅底"];
 
 function renderPoints() {
   const points = loadPoints();
@@ -664,15 +664,25 @@ copyScriptBtn.addEventListener("click", () => {
   });
 });
 
+const REMOVED_LABELS = ["夜盤收盤價", "第一根5K開盤價"];
 const existingPoints = loadPoints();
 if (existingPoints.length === 0) {
   savePoints(DEFAULT_LABELS.map(l => ({ price: "", label: l })));
 } else {
-  const existingLabels = new Set(existingPoints.map(p => (p.label || "").trim()));
+  let points = existingPoints.filter(p => {
+    const isRemoved = REMOVED_LABELS.includes((p.label || "").trim());
+    const isEmpty = p.price === "" || p.price === undefined || p.price === null;
+    return !(isRemoved && isEmpty);
+  });
+  const existingLabels = new Set(points.map(p => (p.label || "").trim()));
   const missing = DEFAULT_LABELS.filter(l => !existingLabels.has(l));
-  if (missing.length) {
-    savePoints([...existingPoints, ...missing.map(l => ({ price: "", label: l }))]);
-  }
+  points = [...points, ...missing.map(l => ({ price: "", label: l }))];
+  const orderIndex = new Map(DEFAULT_LABELS.map((l, i) => [l, i]));
+  points = points
+    .map((p, i) => ({ p, i, order: orderIndex.has((p.label || "").trim()) ? orderIndex.get((p.label || "").trim()) : DEFAULT_LABELS.length + i }))
+    .sort((a, b) => a.order - b.order)
+    .map(x => x.p);
+  savePoints(points);
 }
 renderPoints();
 
