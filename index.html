@@ -529,7 +529,7 @@ async function sendToCoach(text) {
       body: JSON.stringify({
         model: "openai/gpt-oss-120b",
         max_tokens: 400,
-        messages: [{ role: "system", content: buildSystemPrompt(userText) }, ...history.slice(-6)]
+        messages: [{ role: "system", content: buildSystemPrompt(text) }, ...history.slice(-6)]
       })
     });
     const data = await res.json();
@@ -538,7 +538,7 @@ async function sendToCoach(text) {
     history.push({ role: "assistant", content: reply });
     render("coach", reply, nowStr());
   } catch (e) {
-    render("coach", "連線失敗，再說一次。", nowStr());
+    render("coach", "連線失敗：" + (e && e.message ? e.message : String(e)), nowStr());
   } finally {
     thinkingEl.style.display = "none";
   }
