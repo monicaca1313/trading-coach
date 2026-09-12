@@ -528,13 +528,17 @@ async function sendToCoach(text) {
       },
       body: JSON.stringify({
         model: "openai/gpt-oss-120b",
-        max_tokens: 400,
+        reasoning_effort: "low",
+        max_tokens: 600,
         messages: [{ role: "system", content: buildSystemPrompt(text) }, ...history.slice(-6)]
       })
     });
     const data = await res.json();
+    const finishReason = data.choices && data.choices[0] && data.choices[0].finish_reason;
     const reply = (data.choices && data.choices[0] && data.choices[0].message.content)
-      || (data.error ? "錯誤：" + data.error.message : "沒有收到回應，再說一次看看");
+      || (data.error ? "錯誤：" + data.error.message
+        : finishReason === "length" ? "（思考太久把字數用完了，再說一次看看，通常再試一次就好）"
+        : "沒有收到回應，再說一次看看");
     history.push({ role: "assistant", content: reply });
     render("coach", reply, nowStr());
   } catch (e) {
