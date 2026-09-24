@@ -135,6 +135,8 @@
 
   <div id="scriptPage" class="page">
     <p class="tip">開盤前把今天的收盤價跟關鍵點位輸入，按產生，會列出往上開/往下開分別會先碰到哪裡。</p>
+    <div id="scriptStale" class="mono" style="font-size:12px;margin:0 0 10px;"></div>
+    <button id="clearPricesBtn" style="width:100%;background:none;border:1px solid #E5484D;border-radius:10px;padding:8px;color:#E5484D;font-size:12px;margin-bottom:4px;">清空昨天的價位（新的一天先按這個）</button>
     <div class="field-label">PM盤收盤價（基準）</div>
     <input id="closeInput" type="number" inputmode="decimal" placeholder="例如：45090" />
 
@@ -393,10 +395,39 @@ function computeTodayContext(openPrice, pmClose) {
 
 const TODAY_CTX_KEY = "trading_coach_today_context";
 function loadTodayContext() {
-  try { return JSON.parse(localStorage.getItem(TODAY_CTX_KEY) || "null"); }
-  catch (e) { return null; }
+  try {
+    const c = JSON.parse(localStorage.getItem(TODAY_CTX_KEY) || "null");
+    // 不是今天算的就作廢，避免拿昨天的開盤價/球權給教練
+    return c && c.date === todayStr() ? c : null;
+  } catch (e) { return null; }
 }
-function saveTodayContext(ctx) { localStorage.setItem(TODAY_CTX_KEY, JSON.stringify(ctx)); }
+function saveTodayContext(ctx) { localStorage.setItem(TODAY_CTX_KEY, JSON.stringify({ ...ctx, date: todayStr() })); }
+
+function touchScriptStamp() {
+  localStorage.setItem("opening_script_updated", String(Date.now()));
+  refreshStaleNote();
+}
+function refreshStaleNote() {
+  const el = document.getElementById("scriptStale");
+  if (!el) return;
+  const ts = parseInt(localStorage.getItem("opening_script_updated") || "0", 10);
+  if (!ts) {
+    el.style.color = "#F0B429";
+    el.textContent = "⚠️ 不知道這些價位是哪天輸入的，可能是舊資料";
+    return;
+  }
+  const d = new Date(ts);
+  const pad = n => String(n).padStart(2, "0");
+  const dayStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const label = `${dayStr} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  if (dayStr === todayStr()) {
+    el.style.color = "#1FA97D";
+    el.textContent = "上次輸入：" + label + "（今天）";
+  } else {
+    el.style.color = "#F0B429";
+    el.textContent = "⚠️ 上次輸入：" + label + "，不是今天，請確認或按下面的按鈕清空";
+  }
+}
 
 // ---- 富邦行情橋接：讀取電腦上 fubon_coach_bridge.py 開的本機服務 ----
 // 沒開橋接程式、或用手機時會自動失敗，一切照舊走手動輸入，不會壞掉。
@@ -412,6 +443,11 @@ async function fetchLiveMarket() {
     const d = await res.json();
     if (d.date !== todayStr() || d.open == null || d.pmClose == null) throw new Error("no data");
     liveMarket = d;
+    const ci = document.getElementById("closeInput");
+    if (ci && ci.value !== String(d.pmClose)) {
+      ci.value = d.pmClose;
+      localStorage.setItem("opening_script_close", String(d.pmClose));
+    }
     const f = d.first5k || {};
     statusEl.style.color = "#1FA97D";
     statusEl.textContent = "行情：✅ " + d.symbol + "　最新 " + (d.last ?? "-") + (f.locked ? "　第一根5K已鎖定" : "　第一根5K未鎖定");
@@ -659,7 +695,7 @@ function loadPoints() {
 function savePoints(list) { localStorage.setItem(POINTS_KEY, JSON.stringify(list)); }
 
 closeInput.value = localStorage.getItem(CLOSE_KEY) || "";
-closeInput.addEventListener("change", () => localStorage.setItem(CLOSE_KEY, closeInput.value));
+closeInput.addEventListener("change", () => { localStorage.setItem(CLOSE_KEY, closeInput.value); touchScriptStamp(); });
 
 const DEFAULT_LABELS = ["日盤收盤價", "缺口上緣（多方缺口）", "缺口下緣（多方缺口）", "缺口上緣（空方缺口）", "缺口下緣（空方缺口）", "缺口上緣（對稱缺口）", "缺口下緣（對稱缺口）", "30K20MA（移動城牆）", "30K60MA（移動城牆）", "60K亞當", "60K頸線", "斷勢防守點（多勢）", "斷勢防守點（空勢）", "30K黑頂", "30K紅底"];
 
@@ -674,7 +710,7 @@ function renderPoints() {
       <button class="del">✕</button>`;
     const priceEl = row.querySelector(".price");
     const labelEl = row.querySelector(".label");
-    priceEl.addEventListener("change", () => { const cur = loadPoints(); cur[i].price = priceEl.value; savePoints(cur); });
+    priceEl.addEventListener("change", () => { const cur = loadPoints(); cur[i].price = priceEl.value; savePoints(cur); touchScriptStamp(); });
     labelEl.addEventListener("change", () => { const cur = loadPoints(); cur[i].label = labelEl.value; savePoints(cur); });
     row.querySelector(".del").addEventListener("click", () => {
       const cur = loadPoints().filter((_, idx) => idx !== i);
@@ -739,6 +775,17 @@ if (existingPoints.length === 0) {
   savePoints(points);
 }
 renderPoints();
+
+document.getElementById("clearPricesBtn").addEventListener("click", () => {
+  if (!confirm("要清空收盤價和所有點位的價位嗎？（點位名稱會保留）")) return;
+  closeInput.value = "";
+  localStorage.removeItem(CLOSE_KEY);
+  savePoints(loadPoints().map(p => ({ price: "", label: p.label })));
+  localStorage.removeItem(TODAY_CTX_KEY);
+  touchScriptStamp();
+  renderPoints();
+});
+refreshStaleNote();
 
 // Custom rules page
 const newRuleInput = document.getElementById("newRuleInput");
