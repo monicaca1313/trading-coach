@@ -94,6 +94,7 @@
   <header>
     <div class="eyebrow">Live Coach</div>
     <h1>盤中即時教練</h1>
+    <div id="liveStatus" class="mono" style="font-size:11px;color:#8B92A5;margin-top:4px;">行情：未連線（手動模式）</div>
   </header>
 
   <div id="keySetup" style="display:none;">
@@ -397,6 +398,47 @@ function loadTodayContext() {
 }
 function saveTodayContext(ctx) { localStorage.setItem(TODAY_CTX_KEY, JSON.stringify(ctx)); }
 
+// ---- 富邦行情橋接：讀取電腦上 fubon_coach_bridge.py 開的本機服務 ----
+// 沒開橋接程式、或用手機時會自動失敗，一切照舊走手動輸入，不會壞掉。
+const BRIDGE_URL = "http://localhost:8765/";
+let liveMarket = null;
+async function fetchLiveMarket() {
+  const statusEl = document.getElementById("liveStatus");
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 1500);
+    const res = await fetch(BRIDGE_URL, { signal: ctrl.signal, cache: "no-store" });
+    clearTimeout(timer);
+    const d = await res.json();
+    if (d.date !== todayStr() || d.open == null || d.pmClose == null) throw new Error("no data");
+    liveMarket = d;
+    const f = d.first5k || {};
+    statusEl.style.color = "#1FA97D";
+    statusEl.textContent = "行情：✅ " + d.symbol + "　最新 " + (d.last ?? "-") + (f.locked ? "　第一根5K已鎖定" : "　第一根5K未鎖定");
+  } catch (e) {
+    liveMarket = null;
+    statusEl.style.color = "#8B92A5";
+    statusEl.textContent = "行情：未連線（手動模式）";
+  }
+}
+fetchLiveMarket();
+setInterval(fetchLiveMarket, 5000);
+
+function buildLiveText(m) {
+  const f = m.first5k || {};
+  let t = "\n\n【行情自動抓取：系統從富邦API即時取得，這些數字可以直接引用，不算她沒講的變數】\n合約：" + m.symbol +
+    "\n今日開盤價：" + m.open + "\nPM盤收盤價：" + m.pmClose;
+  if (f.open != null && f.close != null) {
+    const color = f.close > f.open ? "紅K" : f.close < f.open ? "黑K" : "平盤";
+    t += "\n第一根5K（08:45~08:50）：開" + f.open + " 高" + f.high + " 低" + f.low + " 收" + f.close +
+      (f.locked ? "，已收線，是" + color + "，她沒講顏色也可以直接照這個判斷" : "，還在進行中，尚未收線，先不要下結論");
+  } else {
+    t += "\n第一根5K：還沒有資料";
+  }
+  if (m.last != null) t += "\n目前最新成交價：" + m.last;
+  return t;
+}
+
 function buildSystemPrompt(userText) {
   const custom = loadCustomRules();
   const customText = custom.length
@@ -417,8 +459,14 @@ function buildSystemPrompt(userText) {
   } catch (e) {}
 
   let ctx = loadTodayContext();
+  const liveOk = !!(liveMarket && liveMarket.open != null && liveMarket.pmClose != null);
+  if (liveOk) {
+    close = String(liveMarket.pmClose);
+    const liveCtx = computeTodayContext(liveMarket.open, liveMarket.pmClose);
+    if (liveCtx) { ctx = liveCtx; saveTodayContext(liveCtx); }
+  }
   const extractedOpen = extractOpenPrice(userText || "");
-  if (extractedOpen != null && close) {
+  if (!liveOk && extractedOpen != null && close) {
     const computed = computeTodayContext(extractedOpen, parseFloat(close));
     if (computed) { ctx = computed; saveTodayContext(computed); }
   }
@@ -434,6 +482,8 @@ function buildSystemPrompt(userText) {
   } else if (close && !ctx) {
     computedText = "\n\n【提醒】她這句話裡沒有講出實際成交的今天開盤價數字（就算她貼了開盤劇本內容、或提到「往上開」「往下開」這種假設情境，只要沒有明確的開盤價數字，都算沒講），你不能自己選一個方向優先分析、也不能假設球權方向。這種時候只能簡短反問她「今天開在哪裡」，最多附帶一句球權判斷規則本身（開盤價高於/低於PM收盤價的定義），絕對不能往下展開站穩/擋、回測、目標、滿足點這些需要已知開盤價才能算的完整分析，等她回報實際開盤價之後才能繼續分析。";
   }
+
+  if (liveOk) computedText += buildLiveText(liveMarket);
 
   return "你是使用者本人的台指期私人交易教練，完全按照她自己的多時間週期價格行為系統來判斷，不要給教科書式的通用技術分析建議。她會用口語、片段的方式描述目前盤勢或部位，你要用她自己的術語和規則去判讀。\n\n她的規則庫：\n" + RULES + customText + "\n\n她的進階心法與補充原則（判讀時也要參考，這些是她多年操作累積的心得，比單條規則更全面）：\n" + ADVANCED_NOTES + scriptText + computedText + "\n\n你的任務：1) 用她的術語判讀她描述的狀況對應到規則庫裡的哪一條或哪幾條 2) 給出具體、可立即執行的下一步 3) 語氣像教練在場邊喊話。\n\n嚴格的講話規則（違反任何一條都算失敗）：\n- 絕對不要把規則名稱用括號標註出來\n- 一句只講一件事，講完就換下一句，不要用分號、頓號把好幾件事串成一個長句\n- 不要用成語、文言字眼，要用口語（先別、等一下、先不要）\n- 總長度2-3句話，每句都短，像真人在旁邊看盤喊一句、停一下、再喊一句\n- 可以直接用她的術語（大量、亞當、尖尖、球權、滿足點等）回她，不用翻譯成白話\n- 絕對不要自己發明規則庫、心法、或她輸入點位裡沒有出現過的講法\n- 提到「大量」位置的時候，一定要講明是等回測，不要講成看到就馬上進場\n- 只能根據她這句話裡實際講出來的資訊回應，她沒有講的變數（口差、是否會出現對稱缺口等）絕對不要自己補充、假設\n- 她沒有提到口差數字的時候，完全不要提口差\n- 「空襲」「奇襲」這類術語，只有在真的符合觸發條件時才能用\n- 如果上面有【系統已經自動算好】的區塊，球權、第一波目標、滿足點這三件事直接照著講，不要自己重新判斷或計算，而且一定要把「目標」跟「滿足點」的實際數字講出來（例如「目標46788，滿足點46800」），絕對不能只講「等第一波目標和滿足點」這種沒有數字的空話，那樣等於沒講\n- 只要她講的是「開在XXXX」，一定要完整講出這個順序，不能跳步驟：1) 球權方向（用系統算好的） 2) 往上開的情況要先看第一根5K收紅K還是收黑K：收紅K才接著看這根5K的收盤價站不站得穩（用「站穩/站上」支撐語言）；收黑K的話，先不要提這根5K的收盤價，只能講先等下面的關卡（例如5K20MA有沒有撐住），不能繼續往下講回測、目標、滿足點；往下開的情況看第一根5K開盤價會不會擋（用「擋/壓力」壓力語言，不要兩邊都講成站穩） 3) 往上開收紅K、或往下開的情況，站穩/擋住後，回測這根5K自己的開/收盤價附近 4) 往上開收紅K的情況：如果回測時跌破（收盤價之下）才改測PM盤收盤價；往下開的情況：如果回測時站上（反彈收復開盤價）才改測PM盤收盤價（方向相反是因為PM收盤價在兩種情境裡的相對位置不同，往上開時PM收盤價較低，往下開時PM收盤價較高，千萬不要兩種情境都講成「跌破」） 5) 如果回測沒有觸發改測PM收盤價（也就是繼續維持原方向），就講第一波目標和滿足點的實際數字（用系統算好的數字，不能只講「目標和滿足點」這種沒有數字的空話；空方情境下第一波目標也可以用「第一根5K高點-300點」或「低點+400~500點」交叉參考）。注意：中間一定要先講「回測自己這根5K的開/收盤價附近」這一步，不能省略\n- 絕對不要講「直接執行」這種下單指令語氣，你是喊話提示的教練，不是幫她下單，最終要不要進場是她自己決定\n- 講「回測PM盤收盤價」的時候，絕對不要加「往上」或「往下」這種方向詞在前面，因為PM盤收盤價的相對位置在往上開/往下開情境裡是相反的（往上開時PM收盤價比較低，回測它其實是價格拉回/往下；往下開時PM收盤價比較高，回測它其實是價格反彈/往上），加錯方向詞等於講反，直接講「回測PM盤收盤價」就好，不要加方向\n- 不要出現「先看...守不住。收住就...」這種前後矛盾的講法（守不住＝破了，收住＝守住，這兩個是相反的狀態，不能連著講好像同一件事），一句只講一個確定的狀態，不要把兩個相反狀態黏在一起講\n- 句尾如果要講「先等再決定」，優先用具體等待條件（例如「等第一根5K收完」），不要講空泛講法\n\n你不是投資顧問，但你是她本人交易系統的化身，不要加免責聲明。";
 }
@@ -478,6 +528,7 @@ async function sendToCoach(text) {
   render("you", text, time);
   history.push({ role: "user", content: text });
   thinkingEl.style.display = "block";
+  await fetchLiveMarket();
   try {
     const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
