@@ -431,7 +431,7 @@ function refreshStaleNote() {
 
 // ---- 富邦行情橋接：讀取電腦上 fubon_coach_bridge.py 開的本機服務 ----
 // 沒開橋接程式、或用手機時會自動失敗，一切照舊走手動輸入，不會壞掉。
-const BRIDGE_URL = "http://localhost:8765/";
+const BRIDGE_URL = "http://127.0.0.1:18765/";
 let liveMarket = null;
 async function fetchLiveMarket() {
   const statusEl = document.getElementById("liveStatus");
