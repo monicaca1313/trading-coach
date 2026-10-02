@@ -95,6 +95,8 @@
     <div class="eyebrow">Live Coach</div>
     <h1>盤中即時教練</h1>
     <div id="liveStatus" class="mono" style="font-size:11px;color:#8B92A5;margin-top:4px;">行情：未連線（手動模式）</div>
+    <div id="consolStatus" class="mono" style="font-size:11px;color:#8B92A5;margin-top:2px;"></div>
+    <div id="maStatus" class="mono" style="font-size:11px;color:#8B92A5;margin-top:2px;"></div>
   </header>
 
   <div id="keySetup" style="display:none;">
@@ -107,9 +109,12 @@
     <button id="tabRulesBtn">新增規則</button>
     <button id="tabScriptBtn">開盤劇本</button>
     <button id="tabReviewBtn">每日複盤</button>
+    <button id="tabReplayBtn">K線重播</button>
   </div>
 
   <div id="coachPage" class="page active">
+    <div id="coachOHLC" class="mono" style="font-size:12px;color:#E8EAF0;margin-bottom:4px;"></div>
+    <canvas id="coachChart" style="width:100%; height:200px; margin-bottom:10px;"></canvas>
     <div id="log">
       <div class="empty">按下麥克風，直接講現在的盤勢或你的部位，教練馬上回你該怎麼做。</div>
     </div>
@@ -123,6 +128,24 @@
         <button id="sendBtn">送出</button>
       </div>
     </footer>
+  </div>
+
+  <div id="replayPage" class="page">
+    <p class="tip">挑一個有資料的過去交易日，一根一根看5K，練習判斷方向。資料是從橋接程式開始跑的那天起累積的，用越久可選的天數越多。</p>
+    <div id="replayDateRow" style="display:flex; gap:8px; margin-bottom:10px;">
+      <select id="replayDateSelect" style="flex:1;"></select>
+      <button id="replayLoadBtn">開始重播</button>
+    </div>
+    <div id="replayStatus" class="mono" style="font-size:12px;color:#8B92A5;margin-bottom:8px;"></div>
+    <canvas id="replayChart" style="width:100%; height:220px; margin-bottom:10px;"></canvas>
+    <div id="replayLog" style="flex:1; overflow-y:auto; font-size:13px; line-height:1.6;"></div>
+    <div id="replayControls" style="display:none; flex-wrap:wrap; gap:8px; margin-top:10px;">
+      <button id="replayNextBtn">下一根 ▶</button>
+      <button id="replayLongBtn">我覺得偏多</button>
+      <button id="replayShortBtn">我覺得偏空</button>
+      <button id="replaySkipBtn">觀望</button>
+      <button id="replayAskBtn">問教練怎麼看</button>
+    </div>
   </div>
 
   <div id="rulesPage" class="page">
@@ -441,24 +464,200 @@ async function fetchLiveMarket() {
     const res = await fetch(BRIDGE_URL, { signal: ctrl.signal, cache: "no-store" });
     clearTimeout(timer);
     const d = await res.json();
-    if (d.date !== todayStr() || d.open == null || d.pmClose == null) throw new Error("no data");
-    liveMarket = d;
+    if (d.date !== todayStr()) throw new Error("no data");
+    // 日盤收盤後，把日盤開高低收填進點位（每個交易日只填一次，之後你手動改的不會被蓋掉）
+    const day = d.day;
+    if (day && day.final && day.close > 0 && localStorage.getItem("opening_script_dayfill_date") !== day.date) {
+      const fills = { "日盤收盤價": day.close, "日盤開盤價": day.open, "日盤高點": day.high, "日盤低點": day.low };
+      const pts = JSON.parse(localStorage.getItem("opening_script_points") || "[]");
+      Object.keys(fills).forEach(label => {
+        if (!(fills[label] > 0)) return;
+        const row = pts.find(p => (p.label || "").trim() === label);
+        if (row) row.price = String(fills[label]); else pts.push({ price: String(fills[label]), label });
+      });
+      localStorage.setItem("opening_script_points", JSON.stringify(pts));
+      localStorage.setItem("opening_script_dayfill_date", day.date);
+      renderPoints();
+    }
+    detectConsolidation(d);
+    checkPointAlerts(d.last, d);
+    updateMA(d.ma);
+    renderCoachChart(d);
+    // PM盤收盤價（夜盤收盤）：不管今天開盤了沒，只要橋接有給就填進開盤劇本
     const ci = document.getElementById("closeInput");
-    if (ci && ci.value !== String(d.pmClose)) {
+    if (ci && d.pmClose > 0 && ci.value !== String(d.pmClose)) {
       ci.value = d.pmClose;
       localStorage.setItem("opening_script_close", String(d.pmClose));
     }
+    if (!(d.open > 0) || !(d.pmClose > 0) || (d.quoteDate && d.quoteDate !== todayStr())) {
+      liveMarket = null;   // 還不是今天的盤，不能拿來算球權
+      const why = d.session === "night" ? "夜盤" : (d.open == null || (d.quoteDate && d.quoteDate !== todayStr())) ? "今天還沒開盤" : "抓不到PM收盤價，球權請手動輸入";
+      statusEl.style.color = "#F0B429";
+      statusEl.textContent = "行情：✅ 已連線（" + why + "）";
+      return;
+    }
+    liveMarket = d;
     const f = d.first5k || {};
     statusEl.style.color = "#1FA97D";
     statusEl.textContent = "行情：✅ " + d.symbol + "　最新 " + (d.last ?? "-") + (f.locked ? "　第一根5K已鎖定" : "　第一根5K未鎖定");
   } catch (e) {
     liveMarket = null;
+    consolState = null;
+    const ce = document.getElementById("consolStatus");
+    if (ce) ce.textContent = "";
+    renderCoachChart({ bars5: [] });
     statusEl.style.color = "#8B92A5";
     statusEl.textContent = "行情：未連線（手動模式）";
   }
 }
 fetchLiveMarket();
 setInterval(fetchLiveMarket, 5000);
+
+// ---- 5K盤整偵測：教練主動提醒 ----
+// 預設：已收的5K連續 6 根、高低差不超過 100 點，就算盤整。
+// 想臨時調整：網址後面加 ?consol=根數,點數，例如 index.html?consol=6,100
+// （加了這個參數也會關掉「只在盤中提醒」的限制，收盤後可以拿來測試）
+const CONSOL_PARAM = new URLSearchParams(location.search).get("consol");
+const CONSOL_TEST = !!CONSOL_PARAM;
+const [CONSOL_MIN_BARS, CONSOL_MAX_RANGE] = CONSOL_PARAM ? CONSOL_PARAM.split(",").map(Number) : [6, 100];
+let consolState = null;       // 目前偵測到的盤整
+let lastSession = null;
+let lastConsolRange = null;   // 最近一次的盤整區間，用來判斷有沒有離開
+const alertedKeys = new Set();
+
+function alertCoach(key, text) {
+  if (alertedKeys.has(key)) return;
+  alertedKeys.add(key);
+  render("coach", text, nowStr());
+  speak(text);
+}
+
+function detectConsolidation(d) {
+  const el = document.getElementById("consolStatus");
+  const bars = Array.isArray(d.bars5) ? d.bars5 : [];
+  const now = new Date();
+  const nowMin = now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60;
+  const session = d.session || "day";
+  const inSession = session === "day" || session === "night";
+  const tag = session === "night" ? "夜盤" : "";
+  if (session !== lastSession) { lastConsolRange = null; lastSession = session; }
+  if (!inSession && !CONSOL_TEST) {
+    consolState = null;
+    el.style.color = "#8B92A5";
+    el.textContent = "5K盤整偵測：非盤中（08:45~13:45、15:00~05:00 才偵測）";
+    return;
+  }
+  const closed = bars.filter(b => {
+    if (b.ts) return b.ts * 1000 + 300000 <= Date.now();
+    const [h, m] = b.t.split(":").map(Number);
+    return h * 60 + m + 5 <= nowMin;
+  });
+  const last = d.last;
+  let found = null;
+  for (let k = closed.length; k >= CONSOL_MIN_BARS; k--) {
+    const win = closed.slice(-k);
+    let hi = Math.max(...win.map(b => b.h));
+    let lo = Math.min(...win.map(b => b.l));
+    if (last != null) { hi = Math.max(hi, last); lo = Math.min(lo, last); }
+    if (hi - lo <= CONSOL_MAX_RANGE) { found = { k, high: hi, low: lo, startT: win[0].t }; break; }
+  }
+  if (found) {
+    consolState = found;
+    lastConsolRange = found;
+    el.style.color = "#F0B429";
+    el.textContent = tag + "5K：盤整中 " + found.k + "根 " + found.low + "~" + found.high + "（" + (found.high - found.low) + "點）";
+    alertCoach("consol:" + session + found.startT,
+      tag + "前面5K已經盤整" + found.k + "根，區間" + found.low + "到" + found.high + "。先不要急著做空或做多，等價格離開區間、收盤站穩或跌破再判斷方向。");
+  } else {
+    consolState = null;
+    el.style.color = "#8B92A5";
+    el.textContent = tag + "5K：沒有盤整（已收" + closed.length + "根）";
+    if (lastConsolRange && last != null) {
+      const r = lastConsolRange;
+      if (last > r.high) {
+        alertCoach("break-up:" + session + r.startT, tag + "價格離開盤整區間往上了（區間" + r.low + "到" + r.high + "，最新" + last + "）。先等5K收盤確認站穩，不要直接追。");
+      } else if (last < r.low) {
+        alertCoach("break-down:" + session + r.startT, tag + "價格離開盤整區間往下了（區間" + r.low + "到" + r.high + "，最新" + last + "）。先等5K收盤確認跌破，不要直接追。");
+      }
+    }
+  }
+}
+
+// ---- 缺口回補 / 關鍵點位觸及：教練主動提醒 ----
+// 用「開盤劇本」頁裡你自己輸入的點位（缺口、均線、頸線…），碰到一次就提醒，同一個點位一天只提醒一次。
+let lastKnownPrice = null;
+const pointAlertedToday = new Set();
+
+function updateMA(ma) {
+  const el = document.getElementById("maStatus");
+  if (!ma) { if (el) el.textContent = ""; return; }
+  if (el) {
+    if (ma.ma20 == null || ma.ma60 == null) {
+      el.style.color = "#8B92A5";
+      el.textContent = "30K均線：資料還在累積（已收" + ma.count + "根，20MA需20根、60MA需60根）";
+    } else {
+      el.style.color = "#1FA97D";
+      el.textContent = "30K均線：20MA " + ma.ma20 + "　60MA " + ma.ma60;
+    }
+  }
+  const fills = {};
+  if (ma.ma20 != null) fills["30K20MA（移動城牆）"] = ma.ma20;
+  if (ma.ma60 != null) fills["30K60MA（移動城牆）"] = ma.ma60;
+  if (Object.keys(fills).length === 0) return;
+  const pts = loadPoints();
+  let changed = false;
+  Object.keys(fills).forEach(label => {
+    const row = pts.find(p => (p.label || "").trim() === label);
+    if (row) { if (row.price !== String(fills[label])) { row.price = String(fills[label]); changed = true; } }
+    else { pts.push({ price: String(fills[label]), label }); changed = true; }
+  });
+  if (changed) { savePoints(pts); renderPoints(); }
+}
+
+function getDynamicLevels(d) {
+  const levels = [];
+  const f = d.first5k;
+  if (f && f.locked && f.open != null && f.close != null && f.close < f.open) {
+    levels.push({ price: String(f.open), label: "開盤第一根5K收黑｜開盤價" });
+  }
+  if (d.session === "night" && Array.isArray(d.bars5) && d.bars5.length) {
+    const sorted = [...d.bars5].sort((a, b) => (a.ts || 0) - (b.ts || 0));
+    const firstBar = sorted[0];
+    const nowSec = Date.now() / 1000;
+    const closed = firstBar.ts ? (firstBar.ts + 300 <= nowSec) : true;
+    if (closed && firstBar.o != null && firstBar.c != null && firstBar.c < firstBar.o) {
+      levels.push({ price: String(firstBar.o), label: "夜盤第一根5K收黑｜開盤價" });
+    }
+  }
+  return levels;
+}
+
+function checkPointAlerts(last, d) {
+  if (last == null) return;
+  if (lastKnownPrice == null) { lastKnownPrice = last; return; }
+  const prev = lastKnownPrice;
+  lastKnownPrice = last;
+  if (prev === last) return;
+
+  const pts = loadPoints().concat(d ? getDynamicLevels(d) : []);
+  pts.forEach((p) => {
+    const level = Number(p.price);
+    if (!(level > 0)) return;
+    const label = (p.label || "").trim();
+    if (!label) return;
+    const touched = (prev - level) * (last - level) <= 0; // 從兩側碰到，或剛好等於
+    if (!touched) return;
+    const key = label + ":" + todayStr();
+    if (pointAlertedToday.has(key)) return;
+    pointAlertedToday.add(key);
+    const text = label.includes("缺口")
+      ? "價格來到" + label + "（" + level + "），這個缺口已經回補，最新" + last
+      : label.includes("收黑｜開盤價")
+        ? label.replace("｜開盤價", "") + "，開盤價" + level + "是關卡，現在價格碰到了，最新" + last
+        : "價格來到" + label + "（" + level + "）附近，最新" + last;
+    alertCoach("point:" + key, text);
+  });
+}
 
 function buildLiveText(m) {
   const f = m.first5k || {};
@@ -472,6 +671,7 @@ function buildLiveText(m) {
     t += "\n第一根5K：還沒有資料";
   }
   if (m.last != null) t += "\n目前最新成交價：" + m.last;
+  if (consolState) t += "\n【系統偵測到】前面5K已經盤整" + consolState.k + "根，區間" + consolState.low + "~" + consolState.high + "，如果她問要不要做空或做多，要提醒她這件事";
   return t;
 }
 
@@ -594,6 +794,216 @@ async function sendToCoach(text) {
   }
 }
 
+// ---- K線重播 ----
+let replayBars = [];
+let replayIndex = 0;
+let replayRevealed = [];
+let replayCalls = [];
+
+function replayBridgeBase() {
+  return BRIDGE_URL.replace(/\/$/, "");
+}
+
+async function loadReplayDates() {
+  const sel = document.getElementById("replayDateSelect");
+  sel.innerHTML = "<option value=''>讀取中…</option>";
+  try {
+    const res = await fetch(replayBridgeBase() + "/replay/dates", { cache: "no-store" });
+    const d = await res.json();
+    sel.innerHTML = "";
+    if (!d.dates || !d.dates.length) {
+      sel.innerHTML = "<option value=''>還沒有存到任何一天的資料</option>";
+      return;
+    }
+    d.dates.forEach((date) => {
+      const opt = document.createElement("option");
+      opt.value = date;
+      opt.textContent = date;
+      sel.appendChild(opt);
+    });
+  } catch (e) {
+    sel.innerHTML = "<option value=''>連不到橋接程式，請先開啟 fubon_coach_bridge.py</option>";
+  }
+}
+
+async function startReplay() {
+  const date = document.getElementById("replayDateSelect").value;
+  const statusEl = document.getElementById("replayStatus");
+  if (!date) return;
+  statusEl.textContent = "載入中…";
+  try {
+    const res = await fetch(replayBridgeBase() + "/replay?date=" + encodeURIComponent(date), { cache: "no-store" });
+    const d = await res.json();
+    replayBars = [...(d.day || []), ...(d.night || [])];
+  } catch (e) {
+    statusEl.textContent = "連不到橋接程式";
+    return;
+  }
+  replayIndex = 0;
+  replayRevealed = [];
+  replayCalls = [];
+  document.getElementById("replayLog").innerHTML = "";
+  renderReplayChart();
+  document.getElementById("replayControls").style.display = replayBars.length ? "flex" : "none";
+  statusEl.textContent = replayBars.length ? ("共 " + replayBars.length + " 根，按「下一根」開始") : "這天沒有存到資料";
+}
+
+function replayBarText(b) {
+  const color = b.c > b.o ? "紅K" : b.c < b.o ? "黑K" : "平K";
+  return b.t + "　開" + b.o + " 高" + b.h + " 低" + b.l + " 收" + b.c + "　" + color;
+}
+
+function renderReplayChart() {
+  drawCandleChart("replayChart", replayRevealed, 260);
+}
+
+function renderCoachChart(d) {
+  const bars = (d && Array.isArray(d.bars5)) ? d.bars5 : [];
+  drawCandleChart("coachChart", bars, 200);
+  const el = document.getElementById("coachOHLC");
+  if (!el) return;
+  if (!bars.length) { el.textContent = ""; return; }
+  const b = bars[bars.length - 1];
+  const vol = b.v != null ? "　量" + b.v : "";
+  const tag = d && d.session === "night" ? "夜盤　" : "";
+  el.textContent = tag + b.t + "　開" + b.o + " 高" + b.h + " 低" + b.l + " 收" + b.c + vol;
+}
+
+function drawCandleChart(canvasId, bars, cssH) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  let ctx;
+  try { ctx = canvas.getContext("2d"); } catch (e) { return; }
+  if (!ctx) return;
+
+  const cssW = canvas.clientWidth || 300;
+  const cssH = 220;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = cssW * dpr;
+  canvas.height = cssH * dpr;
+  if (ctx.setTransform) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+  if (!replayRevealed.length) return;
+
+  const bars = replayRevealed;
+  const highs = bars.map((b) => b.h);
+  const lows = bars.map((b) => b.l);
+  const max = Math.max(...highs);
+  const min = Math.min(...lows);
+  const pad = (max - min) * 0.08 || 1;
+  const top = max + pad;
+  const bottom = min - pad;
+  const range = top - bottom || 1;
+  const y = (price) => cssH - ((price - bottom) / range) * cssH;
+
+  const n = bars.length;
+  const slot = cssW / n;
+  const bodyW = Math.max(2, slot * 0.6);
+
+  bars.forEach((b, i) => {
+    const cx = slot * i + slot / 2;
+    const flat = b.c === b.o;
+    const up = b.c > b.o;
+    const color = flat ? "#8B92A5" : up ? "#E5484D" : "#1FA97D";
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx, y(b.h));
+    ctx.lineTo(cx, y(b.l));
+    ctx.stroke();
+    const yOpen = y(b.o);
+    const yClose = y(b.c);
+    const boxTop = Math.min(yOpen, yClose);
+    const boxH = Math.max(1, Math.abs(yOpen - yClose));
+    ctx.fillRect(cx - bodyW / 2, boxTop, bodyW, boxH);
+  });
+}
+
+function renderReplayLog() {
+  const el = document.getElementById("replayLog");
+  el.innerHTML = "";
+  replayRevealed.forEach((b, i) => {
+    const row = document.createElement("div");
+    row.textContent = replayBarText(b);
+    el.appendChild(row);
+    const call = replayCalls.find((c) => c.barIndex === i);
+    if (call) {
+      const callRow = document.createElement("div");
+      callRow.style.color = "#F0B429";
+      callRow.textContent = "→ 你的判斷：" + call.choice;
+      el.appendChild(callRow);
+    }
+  });
+  el.scrollTop = el.scrollHeight;
+}
+
+function replayNext() {
+  const statusEl = document.getElementById("replayStatus");
+  if (replayIndex >= replayBars.length) {
+    statusEl.textContent = "已經是最後一根了";
+    return;
+  }
+  replayRevealed.push(replayBars[replayIndex]);
+  replayIndex++;
+  renderReplayLog();
+  renderReplayChart();
+  statusEl.textContent = "已看 " + replayIndex + " / " + replayBars.length + " 根";
+}
+
+function replayCall(choice) {
+  if (!replayRevealed.length) return;
+  replayCalls.push({ barIndex: replayRevealed.length - 1, choice });
+  renderReplayLog();
+}
+
+async function askReplayCoach() {
+  if (!apiKey) { keySetup.style.display = "block"; return; }
+  if (!replayRevealed.length) return;
+  const statusEl = document.getElementById("replayStatus");
+  const lastCall = replayCalls.length ? replayCalls[replayCalls.length - 1].choice : "還沒講判斷";
+  const barsText = replayRevealed.map(replayBarText).join("\n");
+  const prompt = "這是重播練習模式，不是真的即時行情。資料是過去某一天的5K，現在只給你看到目前為止已經公開的這幾根，之後的K棒她還沒看到，你也不知道接下來怎麼走，不要假裝知道或暗示接下來的方向。\n\n到目前為止公開的5K：\n" + barsText + "\n\n她目前的判斷：" + lastCall + "\n\n請用她的規則庫判斷，根據這幾根K棒的走勢，給她具體的下一步建議，語氣跟平常一樣，2-3句話。";
+  statusEl.textContent = "教練思考中…";
+  try {
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json", "Authorization": "Bearer " + apiKey },
+      body: JSON.stringify({
+        model: "openai/gpt-oss-120b",
+        reasoning_effort: "low",
+        max_tokens: 400,
+        messages: [
+          { role: "system", content: "你是使用者本人的台指期私人交易教練，完全按照她自己的多時間週期價格行為系統來判斷。\n\n她的規則庫：\n" + RULES + "\n\n她的進階心法與補充原則：\n" + ADVANCED_NOTES },
+          { role: "user", content: prompt }
+        ]
+      })
+    });
+    const data = await res.json();
+    const reply = (data.choices && data.choices[0] && data.choices[0].message.content)
+      || (data.error ? "錯誤：" + data.error.message : "沒有收到回應，再試一次");
+    const row = document.createElement("div");
+    row.style.marginTop = "6px";
+    row.style.color = "#1FA97D";
+    row.textContent = "教練：" + reply;
+    document.getElementById("replayLog").appendChild(row);
+    document.getElementById("replayLog").scrollTop = document.getElementById("replayLog").scrollHeight;
+  } catch (e) {
+    const row = document.createElement("div");
+    row.textContent = "連線失敗：" + (e && e.message ? e.message : String(e));
+    document.getElementById("replayLog").appendChild(row);
+  } finally {
+    statusEl.textContent = "已看 " + replayIndex + " / " + replayBars.length + " 根";
+  }
+}
+
+document.getElementById("replayLoadBtn").addEventListener("click", startReplay);
+document.getElementById("replayNextBtn").addEventListener("click", replayNext);
+document.getElementById("replayLongBtn").addEventListener("click", () => replayCall("偏多"));
+document.getElementById("replayShortBtn").addEventListener("click", () => replayCall("偏空"));
+document.getElementById("replaySkipBtn").addEventListener("click", () => replayCall("觀望"));
+document.getElementById("replayAskBtn").addEventListener("click", askReplayCoach);
+
 // Speech recognition setup
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 const micBtn = document.getElementById("micBtn");
@@ -659,16 +1069,19 @@ const tabCoachBtn = document.getElementById("tabCoachBtn");
 const tabRulesBtn = document.getElementById("tabRulesBtn");
 const tabScriptBtn = document.getElementById("tabScriptBtn");
 const tabReviewBtn = document.getElementById("tabReviewBtn");
+const tabReplayBtn = document.getElementById("tabReplayBtn");
 const coachPage = document.getElementById("coachPage");
 const rulesPage = document.getElementById("rulesPage");
 const scriptPage = document.getElementById("scriptPage");
 const reviewPage = document.getElementById("reviewPage");
+const replayPage = document.getElementById("replayPage");
 
 const tabMap = [
   [tabCoachBtn, coachPage, null],
   [tabRulesBtn, rulesPage, () => renderCustomRules()],
   [tabScriptBtn, scriptPage, null],
   [tabReviewBtn, reviewPage, () => renderReviews()],
+  [tabReplayBtn, replayPage, () => loadReplayDates()],
 ];
 tabMap.forEach(([btn, page, onShow]) => {
   btn.addEventListener("click", () => {
@@ -697,7 +1110,7 @@ function savePoints(list) { localStorage.setItem(POINTS_KEY, JSON.stringify(list
 closeInput.value = localStorage.getItem(CLOSE_KEY) || "";
 closeInput.addEventListener("change", () => { localStorage.setItem(CLOSE_KEY, closeInput.value); touchScriptStamp(); });
 
-const DEFAULT_LABELS = ["日盤收盤價", "缺口上緣（多方缺口）", "缺口下緣（多方缺口）", "缺口上緣（空方缺口）", "缺口下緣（空方缺口）", "缺口上緣（對稱缺口）", "缺口下緣（對稱缺口）", "30K20MA（移動城牆）", "30K60MA（移動城牆）", "60K亞當", "60K頸線", "斷勢防守點（多勢）", "斷勢防守點（空勢）", "30K黑頂", "30K紅底"];
+const DEFAULT_LABELS = ["日盤收盤價", "日盤開盤價", "日盤高點", "日盤低點", "缺口上緣（多方缺口）", "缺口下緣（多方缺口）", "缺口上緣（空方缺口）", "缺口下緣（空方缺口）", "缺口上緣（對稱缺口）", "缺口下緣（對稱缺口）", "30K20MA（移動城牆）", "30K60MA（移動城牆）", "60K亞當", "60K頸線", "斷勢防守點（多勢）", "斷勢防守點（空勢）", "30K黑頂", "30K紅底"];
 
 function renderPoints() {
   const points = loadPoints();
@@ -782,6 +1195,8 @@ document.getElementById("clearPricesBtn").addEventListener("click", () => {
   localStorage.removeItem(CLOSE_KEY);
   savePoints(loadPoints().map(p => ({ price: "", label: p.label })));
   localStorage.removeItem(TODAY_CTX_KEY);
+  localStorage.removeItem("opening_script_dayfill_date");  // 讓行情連上時可以重新自動填入
+  pointAlertedToday.clear();
   touchScriptStamp();
   renderPoints();
 });
