@@ -137,7 +137,8 @@
       <button id="replayLoadBtn">開始重播</button>
     </div>
     <div id="replayStatus" class="mono" style="font-size:12px;color:#8B92A5;margin-bottom:8px;"></div>
-    <canvas id="replayChart" style="width:100%; height:220px; margin-bottom:10px;"></canvas>
+    <div id="replayOHLC" class="mono" style="font-size:13px;color:#E8EAF0;margin-bottom:4px;"></div>
+    <canvas id="replayChart" style="width:100%; height:260px; margin-bottom:10px;"></canvas>
     <div id="replayLog" style="flex:1; overflow-y:auto; font-size:13px; line-height:1.6;"></div>
     <div id="replayControls" style="display:none; flex-wrap:wrap; gap:8px; margin-top:10px;">
       <button id="replayNextBtn">下一根 ▶</button>
@@ -844,6 +845,7 @@ async function startReplay() {
   replayCalls = [];
   document.getElementById("replayLog").innerHTML = "";
   renderReplayChart();
+  document.getElementById("replayOHLC").textContent = "";
   document.getElementById("replayControls").style.display = replayBars.length ? "flex" : "none";
   statusEl.textContent = replayBars.length ? ("共 " + replayBars.length + " 根，按「下一根」開始") : "這天沒有存到資料";
 }
@@ -851,6 +853,24 @@ async function startReplay() {
 function replayBarText(b) {
   const color = b.c > b.o ? "紅K" : b.c < b.o ? "黑K" : "平K";
   return b.t + "　開" + b.o + " 高" + b.h + " 低" + b.l + " 收" + b.c + "　" + color;
+}
+
+function renderReplayOHLC() {
+  const el = document.getElementById("replayOHLC");
+  if (!el) return;
+  if (!replayRevealed.length) { el.textContent = ""; return; }
+  const b = replayRevealed[replayRevealed.length - 1];
+  const vol = b.v != null ? "　量" + b.v : "";
+  el.textContent = b.t + "　目前這根　開" + b.o + " 高" + b.h + " 低" + b.l + " 收" + b.c + vol;
+}
+
+function renderReplayOHLC() {
+  const el = document.getElementById("replayOHLC");
+  if (!el) return;
+  if (!replayRevealed.length) { el.textContent = ""; return; }
+  const b = replayRevealed[replayRevealed.length - 1];
+  const vol = b.v != null ? "　量" + b.v : "";
+  el.textContent = b.t + "　目前這根　開" + b.o + " 高" + b.h + " 低" + b.l + " 收" + b.c + vol;
 }
 
 function renderReplayChart() {
@@ -876,16 +896,20 @@ function drawCandleChart(canvasId, bars, cssH) {
   try { ctx = canvas.getContext("2d"); } catch (e) { return; }
   if (!ctx) return;
 
-  const cssW = canvas.clientWidth || 300;
-  const cssH = 220;
+  const cssWFull = canvas.clientWidth || 300;
   const dpr = window.devicePixelRatio || 1;
-  canvas.width = cssW * dpr;
+  canvas.width = cssWFull * dpr;
   canvas.height = cssH * dpr;
   if (ctx.setTransform) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, cssW, cssH);
-  if (!replayRevealed.length) return;
+  ctx.clearRect(0, 0, cssWFull, cssH);
+  if (!bars.length) return;
 
-  const bars = replayRevealed;
+  const scaleW = 54;              // 右側價格刻度留的寬度
+  const cssW = cssWFull - scaleW; // 蠟燭圖實際可用寬度
+  const priceH = cssH - 70;       // 上半：價格區（下面留70px給成交量）
+  const volGap = 8;
+  const volH = cssH - priceH - volGap; // 下半：成交量區
+
   const highs = bars.map((b) => b.h);
   const lows = bars.map((b) => b.l);
   const max = Math.max(...highs);
@@ -894,12 +918,29 @@ function drawCandleChart(canvasId, bars, cssH) {
   const top = max + pad;
   const bottom = min - pad;
   const range = top - bottom || 1;
-  const y = (price) => cssH - ((price - bottom) / range) * cssH;
+  const y = (price) => priceH - ((price - bottom) / range) * priceH;
 
   const n = bars.length;
   const slot = cssW / n;
   const bodyW = Math.max(2, slot * 0.6);
 
+  // 右側價格刻度：5條橫線
+  ctx.strokeStyle = "#232838";
+  ctx.fillStyle = "#8B92A5";
+  ctx.font = "11px -apple-system, sans-serif";
+  ctx.textBaseline = "middle";
+  const ticks = 5;
+  for (let i = 0; i <= ticks; i++) {
+    const price = bottom + (range * i) / ticks;
+    const yy = y(price);
+    ctx.beginPath();
+    ctx.moveTo(0, yy);
+    ctx.lineTo(cssW, yy);
+    ctx.stroke();
+    ctx.fillText(price.toFixed(0), cssW + 4, yy);
+  }
+
+  // K棒
   bars.forEach((b, i) => {
     const cx = slot * i + slot / 2;
     const flat = b.c === b.o;
@@ -917,6 +958,21 @@ function drawCandleChart(canvasId, bars, cssH) {
     const boxTop = Math.min(yOpen, yClose);
     const boxH = Math.max(1, Math.abs(yOpen - yClose));
     ctx.fillRect(cx - bodyW / 2, boxTop, bodyW, boxH);
+  });
+
+  // 成交量
+  const vols = bars.map((b) => Number(b.v) || 0);
+  const maxVol = Math.max(...vols, 1);
+  const volTop = priceH + volGap;
+  bars.forEach((b, i) => {
+    const cx = slot * i + slot / 2;
+    const flat = b.c === b.o;
+    const up = b.c > b.o;
+    const color = flat ? "#8B92A5" : up ? "#E5484D" : "#1FA97D";
+    const v = Number(b.v) || 0;
+    const h = (v / maxVol) * volH;
+    ctx.fillStyle = color;
+    ctx.fillRect(cx - bodyW / 2, volTop + (volH - h), bodyW, Math.max(1, h));
   });
 }
 
@@ -948,6 +1004,7 @@ function replayNext() {
   replayIndex++;
   renderReplayLog();
   renderReplayChart();
+  renderReplayOHLC();
   statusEl.textContent = "已看 " + replayIndex + " / " + replayBars.length + " 根";
 }
 
