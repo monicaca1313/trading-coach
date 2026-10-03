@@ -878,14 +878,19 @@ function renderReplayChart() {
 }
 
 function renderCoachChart(d) {
-  const bars = (d && Array.isArray(d.bars5)) ? d.bars5 : [];
+  let bars = (d && Array.isArray(d.bars5)) ? d.bars5 : [];
+  let fallback = null;
+  if (!bars.length && d && d.lastBars && Array.isArray(d.lastBars.bars) && d.lastBars.bars.length) {
+    bars = d.lastBars.bars;
+    fallback = d.lastBars.date;
+  }
   drawCandleChart("coachChart", bars, 200);
   const el = document.getElementById("coachOHLC");
   if (!el) return;
   if (!bars.length) { el.textContent = ""; return; }
   const b = bars[bars.length - 1];
   const vol = b.v != null ? "　量" + b.v : "";
-  const tag = d && d.session === "night" ? "夜盤　" : "";
+  const tag = fallback ? ("上次收盤（" + fallback + "）　") : (d && d.session === "night" ? "夜盤　" : "");
   el.textContent = tag + b.t + "　開" + b.o + " 高" + b.h + " 低" + b.l + " 收" + b.c + vol;
 }
 
